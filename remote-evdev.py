@@ -1,12 +1,9 @@
 import argparse
 import asyncio
 import evdev
-import json
 import socket
 import re
 import pickle
-
-from evdev import categorize
 
 
 def try_int(s):
@@ -36,62 +33,21 @@ def get_devices():
     return devices
 
 
-async def do_forward_device(socket, device):
-    async for event in device.async_read_loop():
-        socket.send(pickle.dumps(event))
-        # socket.socket.send(pickle.dumps(event))
-
-
-async def forward_device(socket, device):
-    await do_forward_device(socket, device)
-
-
-async def forward_device_server(connection, device):
+async def get_data(s, devices):
+    print(f"Starting get_data for multiple devices")
     while True:
-        data = connection.recv(1024)
-        if data:
-            event = pickle.loads(data)
-            # print(event)
-            device.write_event(event)
-            device.syn()
+        data = await loop.sock_recv(s, 1024)
+        dev_event = pickle.loads(data)
+        # print(dev_event[0], dev_event[1])
+        devices[dev_event[0]].write_event(dev_event[1])
+        devices[dev_event[0]].syn()
 
 
-async def print_events(device):
-    print("XXXXXXXXXXXXXXXX")
+async def send_data(s, n, device):
+    print(f"Starting send_data for {device.name}")
     async for event in device.async_read_loop():
-        print(categorize(event))
-
-        if event.type != evdev.ecodes.EV_UINPUT:
-            pass
-
-        if event.code == evdev.ecodes.UI_FF_UPLOAD:
-            upload = device.begin_upload(event.value)
-            upload.retval = 0
-
-            print(f'[upload] effect_id: {upload.effect_id}, type: {upload.effect.type}')
-            device.end_upload(upload)
-
-        elif event.code == evdev.ecodes.UI_FF_ERASE:
-            erase = device.begin_erase(event.value)
-            print(f'[erase] effect_id {erase.effect_id}')
-
-            erase.retval = 0
-            device.end_erase(erase)
-
-
-async def run_forward_client(socket, devices):
-    tasks = []
-    for device in devices:
-        tasks.append(asyncio.create_task(forward_device(socket, device)))
-    await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-
-
-async def run_forward_server(socket, devices):
-    tasks = []
-    for device in devices:
-        tasks.append(asyncio.create_task(forward_device_server(socket, device)))
-        tasks.append(asyncio.create_task(print_events(device)))
-    await asyncio.wait(*tasks, return_when=asyncio.FIRST_COMPLETED)
+        dev_event = [n, event]
+        s.send(pickle.dumps(dev_event))
 
 
 parser = argparse.ArgumentParser(description="Remote evdev Tool 0.1")
@@ -100,6 +56,7 @@ parser.add_argument("-c", "--client", help="Run in client mode")
 parser.add_argument("-s", "--server", help="Run in server mode", action="store_true")
 parser.add_argument("-d", "--device", help="Device to pass to the server", action="append")
 args = parser.parse_args()
+
 
 if args.list_devices:
     print("Listing local devices")
@@ -117,7 +74,11 @@ if args.client:
     s = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM)
     s.connect((remote_ip, remote_port))
     s.send(pickle.dumps(devices))
-    asyncio.run(run_forward_client(s, devices))
+    # asyncio.ensure_future(get_data(s))
+    for n, device in enumerate(devices):
+        asyncio.ensure_future(send_data(s, n, device))
+    loop = asyncio.get_event_loop()
+    loop.run_forever()
 
 if args.server:
     print("Running in server mode, listening for devices")
@@ -136,4 +97,6 @@ if args.server:
             devices_local.append(evdev.UInput(cap, name=device.name + f' (via {address[0]})', vendor=device.info.vendor,
                                               product=device.info.product))
             print(f'"{device.name} (via {address[0]})" created')
-        asyncio.run(run_forward_server(connection, devices_local))
+        asyncio.ensure_future(get_data(connection, devices_local))
+        loop = asyncio.get_event_loop()
+        loop.run_forever()
