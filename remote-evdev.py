@@ -34,20 +34,44 @@ def get_devices():
 
 
 async def get_data(s, devices):
-    print(f"Starting get_data for multiple devices")
+    # print(f"Starting get_data for multiple devices")
     while True:
         data = await loop.sock_recv(s, 1024)
-        dev_event = pickle.loads(data)
-        # print(dev_event[0], dev_event[1])
-        devices[dev_event[0]].write_event(dev_event[1])
-        devices[dev_event[0]].syn()
+        if data:
+            dev_event = pickle.loads(data)
+            # print(dev_event[0], dev_event[1])
+            devices[dev_event[0]].write_event(dev_event[1])
+            devices[dev_event[0]].syn()
 
 
 async def send_data(s, n, device):
-    print(f"Starting send_data for {device.name}")
+    # print(f"Starting send_data for {device.name}")
     async for event in device.async_read_loop():
         dev_event = [n, event]
         s.send(pickle.dumps(dev_event))
+
+
+async def print_events(device):
+    print("Rumble!!!")
+    async for event in device.async_read_loop():
+        print(evdev.categorize(event))
+
+        if event.type != evdev.ecodes.EV_UINPUT:
+            pass
+
+        if event.code == evdev.ecodes.UI_FF_UPLOAD:
+            upload = device.begin_upload(event.value)
+            upload.retval = 0
+
+            print(f'[upload] effect_id: {upload.effect_id}, type: {upload.effect.type}')
+            device.end_upload(upload)
+
+        elif event.code == evdev.ecodes.UI_FF_ERASE:
+            erase = device.begin_erase(event.value)
+            print(f'[erase] effect_id {erase.effect_id}')
+
+            erase.retval = 0
+            device.end_erase(erase)
 
 
 parser = argparse.ArgumentParser(description="Remote evdev Tool 0.1")
@@ -74,11 +98,13 @@ if args.client:
     s = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM)
     s.connect((remote_ip, remote_port))
     s.send(pickle.dumps(devices))
-    # asyncio.ensure_future(get_data(s))
     for n, device in enumerate(devices):
         asyncio.ensure_future(send_data(s, n, device))
     loop = asyncio.get_event_loop()
-    loop.run_forever()
+    try:
+        loop.run_forever()
+    except KeyboardInterrupt:
+        loop.close()
 
 if args.server:
     print("Running in server mode, listening for devices")
@@ -98,5 +124,9 @@ if args.server:
                                               product=device.info.product))
             print(f'"{device.name} (via {address[0]})" created')
         asyncio.ensure_future(get_data(connection, devices_local))
+        asyncio.ensure_future(print_events(device))
         loop = asyncio.get_event_loop()
-        loop.run_forever()
+        try:
+            loop.run_forever()
+        except KeyboardInterrupt:
+            loop.close()
