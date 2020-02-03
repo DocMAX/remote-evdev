@@ -34,7 +34,7 @@ def get_devices():
 
 
 async def get_data(s, devices):
-    # print(f"Starting get_data for multiple devices")
+    print(f"Starting get_data for multiple devices")
     while True:
         data = await loop.sock_recv(s, 1024)
         if data:
@@ -45,7 +45,7 @@ async def get_data(s, devices):
 
 
 async def send_data(s, n, device):
-    # print(f"Starting send_data for {device.name}")
+    print(f"Starting send_data for {device.name}")
     async for event in device.async_read_loop():
         dev_event = [n, event]
         s.send(pickle.dumps(dev_event))
@@ -62,19 +62,17 @@ async def print_events(device):
         if event.code == evdev.ecodes.UI_FF_UPLOAD:
             upload = device.begin_upload(event.value)
             upload.retval = 0
-
             print(f'[upload] effect_id: {upload.effect_id}, type: {upload.effect.type}')
             device.end_upload(upload)
 
         elif event.code == evdev.ecodes.UI_FF_ERASE:
             erase = device.begin_erase(event.value)
             print(f'[erase] effect_id {erase.effect_id}')
-
             erase.retval = 0
             device.end_erase(erase)
 
 
-parser = argparse.ArgumentParser(description="Remote evdev Tool 0.1")
+parser = argparse.ArgumentParser(description="Remote evdev tool 0.1")
 parser.add_argument("-l", "--list-devices", help="List available input dev", action="store_true")
 parser.add_argument("-c", "--client", help="Run in client mode")
 parser.add_argument("-s", "--server", help="Run in server mode", action="store_true")
@@ -124,7 +122,7 @@ if args.server:
                                               product=device.info.product))
             print(f'"{device.name} (via {address[0]})" created')
         asyncio.ensure_future(get_data(connection, devices_local))
-        asyncio.ensure_future(print_events(device))
+        asyncio.ensure_future(print_events(devices_local[0]))
         loop = asyncio.get_event_loop()
         try:
             loop.run_forever()
