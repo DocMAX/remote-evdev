@@ -8,13 +8,7 @@ parser = argparse.ArgumentParser(description="Remote evdev tool 0.1")
 parser.add_argument("-s", "--server", help="Server address", required=True)
 parser.add_argument("-d", "--device-name", help="Device to pass to the server", action="append", required=True)
 args = parser.parse_args()
-
 devices = functions.get_devices(args)
-
-async def send_data(sock, data):
-    length = len(data)
-    sock.write(struct.pack('!I', length))
-    sock.write(data)
 
 
 async def get_data_dev(writer, n, device):
@@ -23,7 +17,6 @@ async def get_data_dev(writer, n, device):
         print(event_list[2])
         data = pickle.dumps(event_list)
         writer.write(data)
-        # await send_data(writer, data)
 
 
 async def client_action():
