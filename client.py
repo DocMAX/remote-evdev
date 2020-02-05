@@ -1,7 +1,6 @@
 import argparse
 import asyncio
 import pickle
-import struct
 import functions
 
 parser = argparse.ArgumentParser(description="Remote evdev tool 0.1")
