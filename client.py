@@ -21,7 +21,6 @@ async def get_data_dev(writer, n, device):
 async def client_action():
     reader, writer = await asyncio.open_connection(args.server, 8888)
     device_list = ["devices", devices]
-    # await send_data(writer, device_list)
     writer.write(pickle.dumps(device_list))
     await asyncio.gather(*[get_data_dev(writer, n, device) for n, device in enumerate(devices)])
 
