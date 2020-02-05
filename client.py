@@ -27,4 +27,3 @@ async def client_action():
 loop = asyncio.get_event_loop()
 loop.run_until_complete(client_action())
 loop.close()
-
