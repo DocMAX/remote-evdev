@@ -2,12 +2,13 @@ import asyncio
 import evdev
 import pickle
 import socket
+import base64
 
 
 async def server_action(reader, writer):
     while True:
-        data_enc = await reader.read(1024)
-        data_dec = pickle.loads(data_enc)
+        data_enc = await reader.readline()
+        data_dec = pickle.loads(base64.b64decode(data_enc[:-1]))
         if data_dec[0] == "devices":
             address = writer.get_extra_info('peername')
             address_dns = socket.gethostbyaddr(address[0])

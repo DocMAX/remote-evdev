@@ -1,5 +1,6 @@
 import evdev
 
+
 def try_int(s):
     try:
         return int(s)
