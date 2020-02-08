@@ -1,14 +1,23 @@
 import argparse
 import asyncio
 import pickle
-import functions
 import base64
+import evdev
 
-parser = argparse.ArgumentParser(description="Remote evdev tool 0.1")
-parser.add_argument("-s", "--server", help="Server address", required=True)
-parser.add_argument("-d", "--device-name", help="Device to pass to the server", action="append", required=True)
-args = parser.parse_args()
-devices = functions.get_devices(args)
+
+def get_devices(args):
+    devices_by_name = {}
+    for path in evdev.list_devices():
+        device = evdev.InputDevice(path)
+        devices_by_name[device.name] = device
+    devices = []
+    for name in args.device_name:
+        try:
+            devices.append(devices_by_name[name])
+        except KeyError:
+            print("Device \"" + name + "\" does not exist! Aborting...")
+            exit()
+    return devices
 
 
 def pickle_data(data):
@@ -18,18 +27,38 @@ def pickle_data(data):
 
 
 async def get_data_dev(writer, n, device):
+    print("Get events from this host controllers...")
     async for event in device.async_read_loop():
         event_list = ["event", n, event]
-        print(event_list[2])
+        # print(event_list[2])
         writer.write(pickle_data(event_list))
+
+
+async def put_data_dev(reader):
+    print("Waiting for data...")
+    while True:
+        data_enc = await reader.readline()
+        data_dec = pickle.loads(base64.b64decode(data_enc[:-1]))
+        event = data_dec
+        if event.type == evdev.ecodes.EV_FF:
+            print(event)
 
 
 async def client_action():
     reader, writer = await asyncio.open_connection(args.server, 8888)
     device_list = ["devices", devices]
     writer.write(pickle_data(device_list))
-    await asyncio.gather(*[get_data_dev(writer, n, device) for n, device in enumerate(devices)])
+    await asyncio.gather(*[get_data_dev(writer, n, device) for n, device in enumerate(devices)], put_data_dev(reader))
 
-loop = asyncio.get_event_loop()
-loop.run_until_complete(client_action())
-loop.close()
+parser = argparse.ArgumentParser(description="Remote evdev tool 0.1")
+parser.add_argument("-s", "--server", help="Server address", required=True)
+parser.add_argument("-d", "--device-name", help="Device to pass to the server", action="append", required=True)
+args = parser.parse_args()
+devices = get_devices(args)
+
+try:
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(client_action())
+except KeyboardInterrupt:
+    print("Ctrl-C detected, exiting...")
+    loop.close()

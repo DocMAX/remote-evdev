@@ -12,30 +12,26 @@ def pickle_data(data):
     return data
 
 
-async def get_events(queue, devices):
-    for device in devices:
-        print(f"Writing events from {device.name}")
-        async for event in device.async_read_loop():
-            if event.type != evdev.ecodes.EV_UINPUT:
-                pass
-            if event.type == evdev.ecodes.EV_FF:
+def get_events(queue, devices):
+    def inner():
+        for device in devices:
+            print(f"Writing events from {device.name}")
+            for event in device.read_loop():
+                print(event)
                 queue.put_nowait(event)
-            if event.code == evdev.ecodes.UI_FF_UPLOAD:
-                try:
+                if event.type != evdev.ecodes.EV_UINPUT:
+                    pass
+                if event.code == evdev.ecodes.UI_FF_UPLOAD:
                     upload = device.begin_upload(event.value)
                     upload.retval = 0
                     print(f'[upload] effect_id: {upload.effect_id}, type: {upload.effect.type}')
                     device.end_upload(upload)
-                except:
-                    pass
-            elif event.code == evdev.ecodes.UI_FF_ERASE:
-                try:
+                elif event.code == evdev.ecodes.UI_FF_ERASE:
                     erase = device.begin_erase(event.value)
                     print(f'[erase] effect_id {erase.effect_id}')
                     erase.retval = 0
                     device.end_erase(erase)
-                except:
-                    pass
+    return inner
 
 
 async def writer_handler(queue, writer):
@@ -55,7 +51,7 @@ async def server_handle(reader, writer):
             if not devices:
                 pass
             else:
-                # print(data_dec[2])
+                print(data_dec[2])
                 devices[data_dec[1]].write_event(data_dec[2])
                 devices[data_dec[1]].syn()
         if data_dec[0] == "devices":
@@ -67,7 +63,8 @@ async def server_handle(reader, writer):
                 del cap[0]
                 devices.append(evdev.UInput(cap, name=device.name + f' (via {address_dns[0]})', vendor=device.info.vendor, product=device.info.product))
                 print(f'"{device.name} (via {address_dns[0]})" created')
-            asyncio.create_task(get_events(queue, devices))
+            t_get_events = threading.Thread(target=get_events(queue, devices))
+            t_get_events.start()
             asyncio.create_task(writer_handler(queue, writer))
 
 
