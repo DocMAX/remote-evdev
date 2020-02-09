@@ -1,17 +1,23 @@
-import argparse
+#!/usr/bin/python
+
 import asyncio
 import pickle
 import base64
 import evdev
+import sys
+import socket
 
 
-def get_devices(args):
+dev_names = ["Logitech Logitech RumblePad 2 USB", "Microsoft Microsoft SideWinder Precision Pro (USB)"]
+
+
+def get_device(dev_name):
     devices_by_name = {}
     for path in evdev.list_devices():
         device = evdev.InputDevice(path)
         devices_by_name[device.name] = device
     devices = []
-    for name in args.device_name:
+    for name in dev_name:
         try:
             devices.append(devices_by_name[name])
         except KeyError:
@@ -20,45 +26,59 @@ def get_devices(args):
     return devices
 
 
+async def get_events(device, n, queue):
+    async for event in device.async_read_loop():
+        event_list = ["event", n, event]
+        queue.put_nowait(event_list)
+
+
+def unpickle_data(data):
+    data = base64.b64decode(data[:-1])
+    data = pickle.loads(data)
+    return data
+
+
 def pickle_data(data):
     data = pickle.dumps(data)
     data = base64.b64encode(data) + b'\n'
     return data
 
 
-async def get_data_dev(writer, n, device):
-    print("Get events from this host controllers...")
-    async for event in device.async_read_loop():
-        event_list = ["event", n, event]
-        # print(event_list[2])
-        writer.write(pickle_data(event_list))
-
-
-async def put_data_dev(reader):
-    print("Waiting for data...")
+async def read_handler(reader):
     while True:
-        data_enc = await reader.readline()
-        data_dec = pickle.loads(base64.b64decode(data_enc[:-1]))
-        event = data_dec
-        if event.type == evdev.ecodes.EV_FF:
-            print(event)
+        data = await reader.readline()
+        if not data:
+            print("Disconnect")
+            sys.exit()
+        pickle_object = unpickle_data(data)
+        print(pickle_object)
 
 
-async def client_action():
-    reader, writer = await asyncio.open_connection(args.server, 8888)
+async def write_handler(writer, queue):
+    while True:
+        # print(await queue.get())
+        writer.write(pickle_data(await queue.get()))
+        await writer.drain()
+
+
+async def client():
+    queue = asyncio.Queue()
+    devices = get_device(dev_names)
     device_list = ["devices", devices]
+    try:
+        reader, writer = await asyncio.open_connection('t420', 8888)
+        address = writer.get_extra_info('peername')
+        address_dns = socket.gethostbyaddr(address[0])
+        print(f"Connected to {address_dns[0]}")
+    except ConnectionRefusedError:
+        print("Connection refused")
     writer.write(pickle_data(device_list))
-    await asyncio.gather(*[get_data_dev(writer, n, device) for n, device in enumerate(devices)], put_data_dev(reader))
-
-parser = argparse.ArgumentParser(description="Remote evdev tool 0.1")
-parser.add_argument("-s", "--server", help="Server address", required=True)
-parser.add_argument("-d", "--device-name", help="Device to pass to the server", action="append", required=True)
-args = parser.parse_args()
-devices = get_devices(args)
+    task_write = asyncio.create_task(write_handler(writer, queue))
+    task_read = asyncio.create_task(read_handler(reader))
+    await asyncio.gather(task_read, task_write, *[get_events(device, n, queue) for n, device in enumerate(devices)])
 
 try:
     loop = asyncio.get_event_loop()
-    loop.run_until_complete(client_action())
-except KeyboardInterrupt:
-    print("Ctrl-C detected, exiting...")
-    loop.close()
+    loop.run_until_complete(client())
+except (KeyboardInterrupt, ConnectionRefusedError):
+    pass
