@@ -7,24 +7,6 @@ import evdev
 import socket
 
 
-dev_names = ["SHANWAN PS3 GamePad"]
-
-
-def get_device(dev_name):
-    devices_by_name = {}
-    for path in evdev.list_devices():
-        device = evdev.InputDevice(path)
-        devices_by_name[device.name] = device
-    devices = []
-    for name in dev_name:
-        try:
-            devices.append(devices_by_name[name])
-        except KeyError:
-            print("Device \"" + name + "\" does not exist! Aborting...")
-            exit()
-    return devices
-
-
 async def get_events(device, n, queue):
     async for event in device.async_read_loop():
         event_list = ["event", n, event]
@@ -43,51 +25,71 @@ def pickle_data(data):
     return data
 
 
-async def read_handler(reader, writer):
+async def read_handler(reader, writer, queue):
     while True:
         data = await reader.readline()
+        # print(f"read_handler: {data})")
         if not data:
-            print("Client disconnect, removing devices...")
-            for device in devices:
+            for device in ui_devices:
+                print(f"Removing {device.name}")
                 device.close()
             break
         pickle_object = unpickle_data(data)
+        # print(pickle_object)
         if pickle_object[0] == "event":
-            if not devices:
+            if not ui_devices:
                 pass
             else:
-                print(pickle_object[2])
-                devices[pickle_object[1]].write_event(pickle_object[2])
-                devices[pickle_object[1]].syn()
+                ui_devices[pickle_object[1]].write_event(pickle_object[2])
+                ui_devices[pickle_object[1]].syn()
         if pickle_object[0] == "devices":
             address = writer.get_extra_info('peername')
             address_dns = socket.gethostbyaddr(address[0])
-            devices = []
-            for device in pickle_object[1]:
+            ui_devices = []
+            for n, device in enumerate(pickle_object[1]):
                 cap = device.capabilities()
                 del cap[0]
-                devices.append(
-                    evdev.UInput(cap, name=device.name + f' (via {address_dns[0]})', vendor=device.info.vendor,
-                                 product=device.info.product))
+                ui_devices.append(evdev.UInput(cap, name=device.name + f' (via {address_dns[0]})', vendor=device.info.vendor, product=device.info.product))
                 print(f"Created UInput device {device.name} (via {address_dns[0]})")
+                asyncio.create_task(get_events(ui_devices[n], n, queue))
 
 
 async def write_handler(writer, queue):
     while True:
-        print(await queue.get())
-        writer.write(pickle_data(await queue.get()))
-        await writer.drain()
+        data = await queue.get()
+        # print(f"write_handler: {data})")
+        if data[0] == "event":
+            event = data[2]
+            if event.code == evdev.ecodes.UI_FF_UPLOAD:
+                try:
+                    upload = ui_devices[data[1]].begin_upload(event.value)
+                    upload.retval = 0
+                    print(f'[upload] effect_id: {upload.effect_id}, type: {upload.effect.type}')
+                    ui_devices[data[1]].end_upload(upload)
+                except:
+                    pass
+            elif event.code == evdev.ecodes.UI_FF_ERASE:
+                try:
+                    erase = ui_devices[data[1]].begin_erase(event.value)
+                    print(f'[erase] effect_id {erase.effect_id}')
+                    erase.retval = 0
+                    ui_devices[data[1]].end_erase(erase)
+                except:
+                    pass
+            # print(await queue.get())
+            writer.write(pickle_data(event))
+            await writer.drain()
 
 
 async def server_handle(reader, writer):
     queue = asyncio.Queue()
-    devices = get_device(dev_names)
     task_write = asyncio.create_task(write_handler(writer, queue))
-    task_read = asyncio.create_task(read_handler(reader, writer))
-    await asyncio.gather(task_read, task_write, *[get_events(device, n, queue) for n, device in enumerate(devices)])
+    task_read = asyncio.create_task(read_handler(reader, writer, queue))
+    await asyncio.gather(task_read, task_write)
 
 
 async def main():
+    global ui_devices
     server = await asyncio.start_server(server_handle, '0.0.0.0', 8888)
     addr = server.sockets[0].getsockname()
     print(f'Serving on {addr}')

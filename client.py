@@ -6,9 +6,16 @@ import base64
 import evdev
 import sys
 import socket
+import argparse
 
 
-dev_names = ["Logitech Logitech RumblePad 2 USB", "Microsoft Microsoft SideWinder Precision Pro (USB)"]
+parser = argparse.ArgumentParser(description="Remote evdev tool 0.1")
+parser.add_argument("-s", "--server", help="Server address", required=True)
+parser.add_argument("-d", "--device-name", help="Device to pass to the server", action="append", required=True)
+args = parser.parse_args()
+dev_names = args.device_name
+srv = args.server
+# dev_names = ["Logitech Logitech RumblePad 2 USB", "Microsoft Microsoft SideWinder Precision Pro (USB)"]
 
 
 def get_device(dev_name):
@@ -66,12 +73,13 @@ async def client():
     devices = get_device(dev_names)
     device_list = ["devices", devices]
     try:
-        reader, writer = await asyncio.open_connection('t420', 8888)
+        reader, writer = await asyncio.open_connection(srv, 8888)
         address = writer.get_extra_info('peername')
         address_dns = socket.gethostbyaddr(address[0])
         print(f"Connected to {address_dns[0]}")
     except ConnectionRefusedError:
         print("Connection refused")
+        sys.exit()
     writer.write(pickle_data(device_list))
     task_write = asyncio.create_task(write_handler(writer, queue))
     task_read = asyncio.create_task(read_handler(reader))
