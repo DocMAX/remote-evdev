@@ -33,12 +33,6 @@ def get_device(dev_name):
     return devices
 
 
-async def get_events(device, n, queue):
-    async for event in device.async_read_loop():
-        event_list = ["event", n, event]
-        queue.put_nowait(event_list)
-
-
 def unpickle_data(data):
     data = base64.b64decode(data[:-1])
     data = pickle.loads(data)
@@ -51,14 +45,19 @@ def pickle_data(data):
     return data
 
 
-async def read_handler(reader):
+async def get_own_events(device, n, queue):
+    async for event in device.async_read_loop():
+        event_list = ["client_event", n, event]
+        queue.put_nowait(event_list)
+
+
+async def read_server_loop(reader, queue):
     while True:
         data = await reader.readline()
         if not data:
             print("Disconnect")
             sys.exit()
-        pickle_object = unpickle_data(data)
-        print(pickle_object)
+        queue.put_nowait(unpickle_data(data))
 
 
 async def write_handler(writer, queue):
@@ -68,10 +67,10 @@ async def write_handler(writer, queue):
         await writer.drain()
 
 
-async def client():
+async def client_handler():
     queue = asyncio.Queue()
     devices = get_device(dev_names)
-    device_list = ["devices", devices]
+    device_list = ["client_devices", devices]
     try:
         reader, writer = await asyncio.open_connection(srv, 8888)
         address = writer.get_extra_info('peername')
@@ -81,12 +80,13 @@ async def client():
         print("Connection refused")
         sys.exit()
     writer.write(pickle_data(device_list))
+    task_read = asyncio.create_task(read_server_loop(reader, queue))
     task_write = asyncio.create_task(write_handler(writer, queue))
-    task_read = asyncio.create_task(read_handler(reader))
-    await asyncio.gather(task_read, task_write, *[get_events(device, n, queue) for n, device in enumerate(devices)])
+    await asyncio.gather(task_read, task_write, *[get_own_events(device, n, queue) for n, device in enumerate(devices)])
+
 
 try:
     loop = asyncio.get_event_loop()
-    loop.run_until_complete(client())
+    loop.run_until_complete(client_handler())
 except (KeyboardInterrupt, ConnectionRefusedError):
     pass
