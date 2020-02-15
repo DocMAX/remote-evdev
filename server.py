@@ -20,7 +20,7 @@ def pickle_data(data):
 
 
 async def get_own_events(device, n, queue):
-    # print("get_own_events start")
+    # print(f"get_own_events from device {device.name}")
     async for event in device.async_read_loop():
         event_list = ["server_event", n, event]
         queue.put_nowait(event_list)
@@ -58,17 +58,23 @@ async def write_loop(reader, writer, queue):
         if data[0] == "server_event":
             event = data[2]
             if event.code == evdev.ecodes.UI_FF_UPLOAD:
-                upload = ui_devices[data[1]].begin_upload(event.value)
-                upload.retval = 0
-                print(f'[upload] effect_id: {upload.effect_id}, type: {upload.effect.type}')
-                ui_devices[data[1]].end_upload(upload)
+                try:
+                    upload = ui_devices[data[1]].begin_upload(event.value)
+                    upload.retval = 0
+                    # print(f'[upload] effect_id: {upload.effect_id}, type: {upload.effect.type}')
+                    ui_devices[data[1]].end_upload(upload)
+                    writer.write(pickle_data(data))
+                    await writer.drain()
+                except TypeError:
+                    pass
             elif event.code == evdev.ecodes.UI_FF_ERASE:
-                erase = ui_devices[data[1]].begin_erase(event.value)
-                print(f'[erase] effect_id {erase.effect_id}')
-                erase.retval = 0
-                ui_devices[data[1]].end_erase(erase)
-            writer.write(pickle_data(event))
-            await writer.drain()
+                try:
+                    erase = ui_devices[data[1]].begin_erase(event.value)
+                    # print(f'[erase] effect_id {erase.effect_id}')
+                    erase.retval = 0
+                    ui_devices[data[1]].end_erase(erase)
+                except TypeError:
+                    pass
         if data[0] == "client_event":
             if not ui_devices:
                 pass
@@ -85,6 +91,7 @@ async def write_loop(reader, writer, queue):
                     evdev.UInput(cap, name=device.name + f' (via {address_dns[0]})', vendor=device.info.vendor,
                                  product=device.info.product))
                 print(f"Created UInput device {device.name} (via {address_dns[0]})")
+            for n, device in enumerate(ui_devices):
                 get_event_tasks.append(asyncio.create_task(get_own_events(device, n, queue), name="Device" + str(n)))
     # print("write_loop stop")
 
@@ -108,6 +115,7 @@ try:
     loop.run_forever()
 except KeyboardInterrupt:
     pass
+
 server.close()
 loop.run_until_complete(server.wait_closed())
 loop.close()

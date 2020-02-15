@@ -62,15 +62,30 @@ async def read_server_loop(reader, queue):
 
 async def write_handler(writer, queue):
     while True:
-        # print(await queue.get())
-        writer.write(pickle_data(await queue.get()))
+        data = await queue.get()
+        if data[0] == "server_event":
+            rumble = evdev.ff.Rumble(strong_magnitude=0x0000, weak_magnitude=0xffff)
+            effect_type = evdev.ff.EffectType(ff_rumble_effect=rumble)
+            duration_ms = 1000
+
+            effect = evdev.ff.Effect(
+                evdev.ecodes.FF_RUMBLE, -1, 0,
+                evdev.ff.Trigger(0, 0),
+                evdev.ff.Replay(duration_ms, 0),
+                evdev.ff.EffectType(ff_rumble_effect=rumble)
+            )
+
+            repeat_count = 1
+            effect_id = devices[data[1]].upload_effect(effect)
+            devices[data[1]].write(evdev.ecodes.EV_FF, effect_id, repeat_count)
+            await asyncio.sleep(1)
+            devices[data[1]].erase_effect(effect_id)
+        writer.write(pickle_data(data))
         await writer.drain()
 
 
 async def client_handler():
     queue = asyncio.Queue()
-    devices = get_device(dev_names)
-    device_list = ["client_devices", devices]
     try:
         reader, writer = await asyncio.open_connection(srv, 8888)
         address = writer.get_extra_info('peername')
@@ -84,6 +99,8 @@ async def client_handler():
     task_write = asyncio.create_task(write_handler(writer, queue))
     await asyncio.gather(task_read, task_write, *[get_own_events(device, n, queue) for n, device in enumerate(devices)])
 
+devices = get_device(dev_names)
+device_list = ["client_devices", devices]
 
 try:
     loop = asyncio.get_event_loop()
