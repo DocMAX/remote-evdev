@@ -4,7 +4,6 @@ import pickle
 import asyncio
 import evdev
 import socket
-import time
 
 
 parser = argparse.ArgumentParser(description="evdev-client 0.1")
