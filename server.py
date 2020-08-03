@@ -54,7 +54,6 @@ async def write_loop(reader, writer, queue):
     while True:
         data = await queue.get()
         writer.write(pickle_data(data))
-        await writer.drain()
 
 
 async def server_handler(reader, writer):

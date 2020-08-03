@@ -31,7 +31,11 @@ async def tcp_client():
     reader, writer = await asyncio.open_connection(srv, 8888)
     writer.write(pickle_data(["client_devices", devs]))
     while True:
-        data = unpickle_data(await reader.readline())
+        try:
+            data = unpickle_data(await reader.readline())
+        except EOFError:
+            print("Connection lost...")
+            break
         if data[0] == "srv_dev":
             address = writer.get_extra_info('peername')
             address_dns = socket.gethostbyaddr(address[0])
@@ -45,12 +49,16 @@ async def tcp_client():
             if not data[0]:
                 break
             devices[data[1]].write_event(data[2])
+
+
+loop = asyncio.get_event_loop()
+
 try:
-    loop = asyncio.get_event_loop()
     loop.run_until_complete(tcp_client())
-    loop.close()
 except KeyboardInterrupt:
     for device in devices:
         print("Removing " + device.name)
         device.close()
     pass
+
+loop.close()
