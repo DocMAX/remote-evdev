@@ -4,6 +4,7 @@ import pickle
 import asyncio
 import evdev
 import socket
+import time
 
 
 parser = argparse.ArgumentParser(description="evdev-client 0.1")
@@ -29,31 +30,28 @@ def pickle_data(data):
 
 async def tcp_client():
     reader, writer = await asyncio.open_connection(srv, 8888)
-
     writer.write(pickle_data(["client_devices", devs]))
-
     while True:
         data = unpickle_data(await reader.readline())
-        if data[0] == "srv_device":
+        if data[0] == "srv_dev":
             address = writer.get_extra_info('peername')
             address_dns = socket.gethostbyaddr(address[0])
-            device = data[1]
+            device = data[2]
             cap = device.capabilities()
             del cap[0]
             devices.append(evdev.UInput(cap, name=device.name + f' (via {address_dns[0]})', vendor=device.info.vendor,
                                         product=device.info.product))
             print(f"Created UInput device {device.name} (via {srv})")
         if data[0] == "srv_dev_event":
-            print(data)
-
-
-def main():
-
-    try:
-        asyncio.run(tcp_client())
-    except KeyboardInterrupt:
-        pass
-
-
-if __name__ == "__main__":
-    main()
+            if not data[0]:
+                break
+            devices[data[1]].write_event(data[2])
+try:
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(tcp_client())
+    loop.close()
+except KeyboardInterrupt:
+    for device in devices:
+        print("Removing " + device.name)
+        device.close()
+    pass

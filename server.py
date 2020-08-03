@@ -19,10 +19,11 @@ def pickle_data(data):
 async def get_dev_events(device, n, queue):
     async for event in device.async_read_loop():
         event_list = ["srv_dev_event", n, event]
-        queue.put_nowait(event_list)
+        await queue.put(event_list)
 
 
 async def read_loop(reader, writer, queue, task_write_loop):
+    devices = []
     get_event_tasks = []
     while True:
         try:
@@ -30,21 +31,30 @@ async def read_loop(reader, writer, queue, task_write_loop):
         except EOFError:
             for path in paths:
                 print("Unexporting " + path)
+            paths.clear()
+            for task in get_event_tasks:
+                task.cancel()
+            get_event_tasks.clear()
+            for device in devices:
+                device.close()
+            task_write_loop.cancel()
             break
         if data[0] == "client_devices":
             paths = data[1]
-            for path in data[1]:
+            for path in paths:
                 print("Exporting " + path)
-            for n, path in enumerate(data[1]):
-                device = evdev.InputDevice(path)
-                queue.put_nowait(pickle_data(["srv_device", device]))
-                get_event_tasks.append(asyncio.create_task(get_dev_events(device, n, queue), name="Device" + str(n)))
+            for n, path in enumerate(paths):
+                devices.append(evdev.InputDevice(path))
+            for device in devices:
+                await queue.put(["srv_dev", n, device])
+                get_event_tasks.append(asyncio.create_task(get_dev_events(device, n, queue), name="dev" + str(n)))
 
 
 async def write_loop(reader, writer, queue):
     while True:
         data = await queue.get()
-        writer.write(data)
+        writer.write(pickle_data(data))
+        await writer.drain()
 
 
 async def server_handler(reader, writer):
@@ -54,21 +64,17 @@ async def server_handler(reader, writer):
     await asyncio.gather(task_write_loop, task_read_loop)
 
 
-def main():
-    loop = asyncio.get_event_loop()
-    coro = asyncio.start_server(server_handler, '0.0.0.0', 8888)
-    server = loop.run_until_complete(coro)
-    addr = server.sockets[0].getsockname()
-    print(f'Serving on {addr}')
+loop = asyncio.get_event_loop()
+coro = asyncio.start_server(server_handler, '0.0.0.0', 8888)
+server = loop.run_until_complete(coro)
+addr = server.sockets[0].getsockname()
+print(f'Serving on {addr}')
 
-    try:
-        loop.run_forever()
-    except KeyboardInterrupt:
-        print("Caught keyboard interrupt. Canceling tasks...")
-    finally:
-        for task in asyncio.all_tasks():
-            task.cancel()
+try:
+    loop.run_forever()
+except KeyboardInterrupt:
+    pass
 
-
-if __name__ == "__main__":
-    main()
+server.close()
+loop.run_until_complete(server.wait_closed())
+loop.close()
