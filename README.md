@@ -10,3 +10,5 @@ example client usage:
 example server usage:  
 
     server.py
+
+if anyone is able to add force feedback, please let me know
